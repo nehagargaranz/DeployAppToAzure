@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-golang-app
+  namespace: azure-golang
+  labels:
+    app: azure-golang-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: azure-golang-app
+  template:
+    metadata:
+      labels:
+        app: azure-golang-app
+        aadpodidbinding: aks-app-id
+    spec:
+      volumes:
+      - name: secrets-store-inline
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: aks-secrets-kv
+      containers:
+      - name: azure-golang-app
+        image: servian/techchallengeapp:latest 
+        command: ["/bin/sh"]
+        args: ["-c", "./TechChallengeApp serve"]
+        env:
+        - name: VTT_LISTENHOST
+          value: "0.0.0.0"
+        - name: VTT_LISTENPORT
+          value: "80"
+        - name: VTT_DBUSER
+          valueFrom: 
+            secretKeyRef:
+              name: username
+              key: PGSQL_USER
+        - name: VTT_DBPASSWORD
+          valueFrom: 
+            secretKeyRef:
+              name: password
+              key: PGSQL_PASSWORD
+        envFrom:
+        - configMapRef:
+            name: golang-database-config
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: secrets-store-inline
+          mountPath: "/mnt/secrets-store"
+          readOnly: true      

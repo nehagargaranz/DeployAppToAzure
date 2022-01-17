@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: azure-golang-app
+  labels:
+    app: azure-golang-app
+  namespace: azure-golang
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: azure-golang-app

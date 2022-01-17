@@ -1,0 +1,110 @@
+name: deploy_app
+
+on: 
+  # push:
+  #   paths:
+  #     - infrastructure/**
+  #   branches:
+  #     - main
+  workflow_dispatch
+
+env:
+  RG_NAME: 'aks-golang-application'
+  CLUSTER_NAME: 'aks-golang-application'
+  SUBSCRIPTION_ID: ''
+  TENANT_ID: ''
+
+jobs:
+  CreateCluster:
+    name: 'Create AKS cluster for app'
+    env:
+      ARM_CLIENT_ID: ${{ secrets.SVC_KUBE_CLIENTID }}
+      ARM_CLIENT_SECRET: ${{ secrets.SVC_KUBE_CLIENTSECRET }}
+      ARM_SUBSCRIPTION_ID: $SUBSCRIPTION_ID
+      ARM_TENANT_ID: $TENANT_ID
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: hashicorp/setup-terraform@v1.2.1 
+
+    - name: Terraform Format
+      id: fmt
+      run: |
+        ls
+        cd infrastructure
+        terraform fmt -list=true -diff
+
+    - name: Terraform Init
+      id: init
+      run: |
+        cd infrastructure
+        subscription=${{ env.SUBSCRIPTION_ID }}
+        tenant_id=${{ env.TENANT_ID }}
+        terraform init -backend-config=configs/backend.tfvars.json -backend-config="subscription_id=$subscription" -backend-config="tenant_id=$tenant_id"
+    
+    - name: Terraform Validate
+      id: validate
+      run: |
+        cd infrastructure
+        terraform validate -json  
+
+    - name: Terraform Apply
+      id: apply  
+      run:  |
+        cd infrastructure
+        subscription=${{ env.SUBSCRIPTION_ID }}
+        tenant_id=${{ env.TENANT_ID }}
+        terraform apply -var-file=configs/infrastructure.tfvars.json -var="subscription_id=$subscription" -var="tenant_id=$tenant_id" --auto-approve
+        
+  DeployApp:
+    name: 'Deploy app to the cluster'
+    needs: [CreateCluster]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2 
+
+    - name: Install Kubernetes
+      uses: azure/setup-kubectl@v1
+      id: install_kubectl
+      with:
+          version: 'v1.21.2'
+
+    - name: Deploy app
+      run: |
+        set -euo pipefail
+
+        az login --service-principal -u ${{ secrets.SVC_KUBE_CLIENTID }} -p ${{ secrets.SVC_KUBE_CLIENTSECRET }} --tenant ${{ env.TENANT_ID }}
+        az account set -s ${{ env.SUBSCRIPTION_ID }}
+        az account show            
+        az aks get-credentials --resource-group ${{ env.RG_NAME }} --name ${{ env.CLUSTER_NAME }}     
+
+        ls
+        cd deployment
+        kubectl apply -f secretproviderclass.yaml       
+        kubectl apply -f golang-app.yaml
+        kubectl apply -f golang-service.yaml
+
+    - name: Verify app deployment
+      run: |
+        set -euo pipefail
+
+        echo "Verify Cluster"
+        echo "Checking nodes..."
+        kubectl -n azure-golang get nodes
+        
+        echo "..."
+        echo "Checking deployment status..."
+        kubectl -n azure-golang get deployment
+        
+        echo "..."
+        echo "Checking pods status..."
+        kubectl -n azure-golang get pods
+
+        echo "..."
+        echo "Checking service status..."
+        kubectl -n azure-golang get services
+        
+       
+    
